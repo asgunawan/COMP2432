@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define MAX_BOOKINGS 20
 #define MAX_NAME_LEN 50
@@ -48,6 +47,7 @@ void fcfs_schedule() {
     for (int i = 0; i < booking_count; i++) {
         int assigned = 0;
         for (int j = 0; j < 3; j++) {
+            printf("Checking booking %d for slot %d: parking_slot_end=%d, booking_start=%d\n", i, j, parking_slots[j], bookings[i].start_time);
             if (parking_slots[j] <= bookings[i].start_time) {
                 schedule[schedule_count].id = bookings[i].id;
                 schedule[schedule_count].parking_slot = j + 1;
@@ -55,6 +55,7 @@ void fcfs_schedule() {
                 schedule[schedule_count].end_time = bookings[i].start_time + bookings[i].duration;
                 strcpy(schedule[schedule_count].status, "Scheduled");
                 parking_slots[j] = schedule[schedule_count].end_time;
+                printf("Booking %d assigned to slot %d: start=%d, end=%d\n", i, j + 1, schedule[schedule_count].start_time, schedule[schedule_count].end_time);
                 schedule_count++;
                 assigned = 1;
                 break;
@@ -66,6 +67,7 @@ void fcfs_schedule() {
             schedule[schedule_count].start_time = bookings[i].start_time;
             schedule[schedule_count].end_time = bookings[i].start_time + bookings[i].duration;
             strcpy(schedule[schedule_count].status, "Rejected");
+            printf("Booking %d rejected: start=%d, end=%d\n", i, schedule[schedule_count].start_time, schedule[schedule_count].end_time);
             schedule_count++;
         }
     }
@@ -87,9 +89,6 @@ void print_schedule() {
 }
 
 int main() {
-    int pipefd[2];
-    pid_t pid;
-
     // Dummy data
     add_booking(0, "member_A", "Event", 8, 2, 1);
     add_booking(1, "member_B", "Parking", 8, 1, 3);
@@ -98,33 +97,8 @@ int main() {
     add_booking(4, "member_E", "Event", 11, 3, 1);
     add_booking(5, "member_A", "Parking", 13, 1, 3);
 
-    if (pipe(pipefd) == -1) {
-        perror("pipe");
-        exit(EXIT_FAILURE);
-    }
-
-    pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid == 0) { // Child process
-        close(pipefd[1]); // Close write end
-        read(pipefd[0], bookings, sizeof(bookings));
-        read(pipefd[0], &booking_count, sizeof(booking_count));
-        close(pipefd[0]);
-
-        fcfs_schedule();
-        print_schedule();
-    } else { // Parent process
-        close(pipefd[0]); // Close read end
-        write(pipefd[1], bookings, sizeof(bookings));
-        write(pipefd[1], &booking_count, sizeof(booking_count));
-        close(pipefd[1]);
-
-        wait(NULL); // Wait for child process to finish
-    }
+    fcfs_schedule();
+    print_schedule();
 
     return 0;
 }
