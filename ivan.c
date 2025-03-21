@@ -361,10 +361,6 @@ bool validateCommandFormat(const char* command, CommandType cmdType) {
             return false;
     }
     
-    if(!validateDateTime(date, time)) return false;
-    if(!validateMember(member)) return false;
-    
-
     return true;
 }
 
