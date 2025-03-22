@@ -37,8 +37,11 @@ int accepted_count[NUM_OF_MEMBER] = {0};
 Schedule rejected[NUM_OF_MEMBER][MAX_BOOKINGS];
 int rejected_count[NUM_OF_MEMBER] = {0};
 
+Booking refer_booking[MAX_BOOKINGS]; //refer bookings with s.id
+
 Booking bookings[MAX_BOOKINGS];
 Schedule schedule[MAX_BOOKINGS];
+
 int booking_count = 0;
 int schedule_count = 0;
 
@@ -281,6 +284,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
         }
     }
 }
+
 int get_index_from_member(char* member) {
     if (strncmp(member, "member_", 7) == 0) {
         char ch = member[7];
@@ -289,15 +293,17 @@ int get_index_from_member(char* member) {
     return -1;
 }
 
-void parse_and_separate(const char* line) {
+void parse_and_classify_line(const char* line) {
     Schedule s;
-    if (sscanf(line, "%d %s %s %d %d %d %s", 
-        &s.id, s.client, s.type, &s.parking_slot, &s.start_time, &s.end_time, s.status) != 7) {
+    Booking b;
+    if (sscanf(line, "%d %s %s %d %d %d %s %s",
+               &s.id, b.client, b.type, &s.parking_slot, &s.start_time, &s.end_time, s.status, b.date) != 8) {
         return;
     }
-
-    int member_idx = get_index_from_member(s.client);
+    int member_idx = get_index_from_member(b.client);
     if (member_idx == -1) return;
+
+    refer_booking[s.id] = b;
 
     if (strcmp(s.status, "Scheduled") == 0) {
         accepted[member_idx][accepted_count[member_idx]++] = s;
@@ -305,13 +311,25 @@ void parse_and_separate(const char* line) {
         rejected[member_idx][rejected_count[member_idx]++] = s;
     }
 }
+void printBookings(const char* algorithm, int pipe_fd) {
+    char buffer[256];
+    int bytes_read;
+    int buf_len = 0;
 
-void printBookings(const char* algorithm) {
-    if (strcmp(algorithm, "ALL"))
-    {
-        summary_report();
-        return;
+    //read lines from parent
+    while ((bytes_read = read(pipe_fd, buffer+buf_len, sizeof(buffer)-buf_len-1)) > 0) {
+        buf_len += bytes_read;
+        buffer[buf_len] = '\0';
+
+        char *line = strtok(buffer, '\n');
+        while (line != NULL) {
+            parse_and_classify_line(line);
+            line = strtok(NULL, '\n');
+        }
+        buf_len = 0;
     }
+
+    //accepted bookings
     printf("\n*** Parking Booking - ACCEPTED / %s ***\n\n", algorithm);
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
         printf("Member_%c has the following bookings:\n\n", 'A' + i);
@@ -325,11 +343,14 @@ void printBookings(const char* algorithm) {
         printf("==========================================================\n");
         for (int j = 0; j < accepted_count[i]; j++) {
             Schedule s = accepted[i][j];
-            printf("%-12s%-8d%-8s%-12s%-8d\n", s.date, s.start_time, s.end_time, s.type, s.device);
+            Booking b = refer_booking[s.id];
+
+            printf("%-12s%-8d%-8s%-12s%-8d\n", b.date, s.start_time, s.end_time, b.type, s.device);
         }
         printf("\n");
     }
 
+    //rejected bookings
     printf("\n*** Parking Booking - REJECTED / %s ***\n\n", algorithm);
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
         if (rejected_count[i] == 0) continue;
@@ -340,11 +361,14 @@ void printBookings(const char* algorithm) {
 
         for (int j = 0; j < rejected_count[i]; j++) {
             Schedule s = rejected[i][j];
-            printf("%-12s%-8d%-8s%-12s%-8d\n", s.date, s.start_time, s.end_time, s.type, s.device);
+            Booking b = refer_booking[s.id];
+
+            printf("%-12s%02d:00   %02d:00   %-20s\n", b.date, s.start_time, s.end_time, b.type, s.device);
         }
         printf("\n");
     }
 }
+
 // void summary_report()
 // {
 //     int total = 0, acc = 0, rej = 0;
@@ -362,11 +386,44 @@ void printBookings(const char* algorithm) {
 //     printf("Bookings Accepted: %d (%.2f%%)\n", acc, total ? (acc * 100.0 / total) : 0);
 //     printf("Bookings Rejected: %d (%.2f%%)\n", rej, total ? (rej * 100.0 / total) : 0);
 // }
+
 int main() {
-    char buffer[MAX_LINE];
-    while (fgets(buffer, sizeof(buffer), stdin)) {
-        parse_and_classify(buffer);
+    int pipe_fd[2];
+    pid_t pid;
+
+    // Dummy data
+    add_booking(0, "member_A", "Event", 8, 3, 1);  // Ends at 11, Slot 1
+    add_booking(1, "member_B", "Parking", 8, 3, 3); // Ends at 11, Slot 2
+    add_booking(2, "member_C", "Reservation", 8, 3, 2); // Ends at 11, Slot 3
+    add_booking(3, "member_D", "Essentials", 9, 2, 4); // Should be Rejected
+    add_booking(4, "member_E", "Event", 11, 3, 1); // Ends at 14, Slot 1
+    add_booking(5, "member_A", "Parking", 12, 2, 3); // Should be Rejected
+
+    // Create a pipe
+    if (pipe(pipe_fd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
     }
-    printBookings("FCFS");
+
+    // Fork a child process
+    pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0) {
+        // Child process: Read from pipe and print schedule
+        close(pipe_fd[1]); // Close unused write end
+        printBookings("Priority",pipe_fd[0]);
+        close(pipe_fd[0]);
+    } else {
+        // Parent process: Write schedule to pipe using priority scheduling
+        close(pipe_fd[0]); // Close unused read end
+        priority_schedule_to_pipe(pipe_fd[1]);
+        close(pipe_fd[1]);
+        wait(NULL); // Wait for child process to finish
+    }
+
     return 0;
 }
