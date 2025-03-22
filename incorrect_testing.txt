@@ -1,1 +1,7 @@
-
+add
+add;
+addEvent;
+addEvent -member_B 2025-05-15 14:00 3.0 umbrella cable battery;
+addEvent -member_Z 2025-05-15 14:00 3.0 umbrella cable battery;
+addEvent -member_B 2025-05-15 14:99 3.0 umbrella cable battery;
+addParking -member_D 2025-05-16 11:00 3.0 cable locker;
