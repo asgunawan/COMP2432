@@ -45,8 +45,8 @@ typedef struct {
     char status[MAX_NAME_LENGTH];
 } Schedule;
 
+
 void initializePipes();
-void cleanupPipes();
 bool validateMember(const char* memberName);
 bool validateDateTime(const char* date, const char* time);
 bool validateFacilities(char facilities[][MAX_FACILITY_NAME_LENGTH], int count);
@@ -61,7 +61,6 @@ void printBookings(const char* algorithm, int pipe_fd);
 bool validateDuration(float duration);
 const char* getAlgorithmName(int index);
 void fcfs_schedule_to_pipe(int pipe_fd);
-int convertTimeToInt(const char* time_str);
 void shortest_job_first_to_pipe(int pipe_fd);
 void priority_schedule_to_pipe(int pipe_fd);
 
@@ -188,26 +187,6 @@ void processInput(FILE* input, bool isBatchFile) {
                         close(pipe_fd[1]);
                     }
                 }
-                // if (strcmp(algorithm, "fcfs") == 0) {
-                //     pipe_idx = 0;
-                // } else if (strcmp(algorithm, "sjf") == 0) {
-                //     pipe_idx = 1;
-                // } else if (strcmp(algorithm, "prio") == 0) {
-                //     pipe_idx = 2;
-                // } else if (strcmp(algorithm, "all") == 0) {
-                //     for (int i = 0; i < MAX_ALGORITHMS; i++) {
-                //         printf("\nPrinting schedule for all algorithms\n");
-                //         printBookings(getAlgorithmName(i), pipes[i].read_fd);
-                //     }
-                //     continue;
-                // } else {
-                //     printf("Error: Unknown algorithm '%s'.\n", algorithm);
-                //     continue;
-                // }
-
-                // if (pipe_idx != -1) {
-                //     printBookings(algorithm, pipes[pipe_idx].read_fd);
-                // }
         }
         else {
             // Check the command type
@@ -623,6 +602,7 @@ Booking refer_booking[MAX_BOOKINGS]; //refer bookings with s.id
 
 Booking bookings[MAX_BOOKINGS];
 Schedule schedule[MAX_BOOKINGS];
+
 
 int schedule_count = 0;
 
