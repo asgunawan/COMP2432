@@ -247,7 +247,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
                 schedule[schedule_count].end_time = bookings[i].start_time + bookings[i].duration;
                 strcpy(schedule[schedule_count].status, "Scheduled");
                 parking_slots[j] = schedule[schedule_count].end_time;
-
+                
                 // Write schedule to pipe
                 snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
                          schedule[schedule_count].id,
@@ -296,8 +296,8 @@ int get_index_from_member(char* member) {
 void parse_and_classify_line(const char* line) {
     Schedule s;
     Booking b;
-    if (sscanf(line, "%d %s %s %d %d %d %s %s",
-               &s.id, b.client, b.type, &s.parking_slot, &s.start_time, &s.end_time, s.status, b.date) != 8) {
+    if (sscanf(line, "%d %s %s %d %d %d %s",
+               &s.id, b.client, b.type, &s.parking_slot, &s.start_time, &s.end_time, s.status) != 7) {
         return;
     }
     int member_idx = get_index_from_member(b.client);
@@ -321,10 +321,10 @@ void printBookings(const char* algorithm, int pipe_fd) {
         buf_len += bytes_read;
         buffer[buf_len] = '\0';
 
-        char *line = strtok(buffer, '\n');
+        char *line = strtok(buffer, "\n");
         while (line != NULL) {
             parse_and_classify_line(line);
-            line = strtok(NULL, '\n');
+            line = strtok(NULL, "\n");
         }
         buf_len = 0;
     }
@@ -345,7 +345,7 @@ void printBookings(const char* algorithm, int pipe_fd) {
             Schedule s = accepted[i][j];
             Booking b = refer_booking[s.id];
 
-            printf("%-12s%-8d%-8s%-12s%-8d\n", b.date, s.start_time, s.end_time, b.type, s.device);
+            printf("%-10s%-8d%-8d%-12s\n", b.date, s.start_time, s.end_time, b.type);
         }
         printf("\n");
     }
@@ -363,7 +363,9 @@ void printBookings(const char* algorithm, int pipe_fd) {
             Schedule s = rejected[i][j];
             Booking b = refer_booking[s.id];
 
-            printf("%-12s%02d:00   %02d:00   %-20s\n", b.date, s.start_time, s.end_time, b.type, s.device);
+            printf("%-10s%-8d%-8d%-12s\n", b.date, s.start_time, s.end_time, b.type);
+
+            //printf("%-12s%02d:00   %02d:00   %-20s\n", b.date, s.start_time, s.end_time, b.type);
         }
         printf("\n");
     }
