@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #define MAX_COMMAND_LENGTH 256
 #define MAX_NAME_LENGTH 50
@@ -13,6 +14,8 @@
 #define MAX_FACILITIES 3
 #define MAX_FACILITY_NAME_LENGTH 20
 #define MAX_ALGORITHMS 3
+#define TOTAL_PARKING_SLOTS 10
+#define INF 1000000000
 
 typedef enum {
     CMD_ADD_PARKING,
@@ -24,6 +27,7 @@ typedef enum {
 } CommandType;
 
 typedef struct {
+    int id;
     char memberName[MAX_NAME_LENGTH];
     char date[MAX_DATE_LENGTH];
     char time[MAX_DATE_LENGTH];
@@ -41,11 +45,6 @@ typedef struct {
     char status[MAX_NAME_LENGTH];
 } Schedule;
 
-typedef struct {
-    int read_fd;
-    int write_fd;
-} PipePair;
-
 
 void initializePipes();
 bool validateMember(const char* memberName);
@@ -61,41 +60,13 @@ bool validatePrintBooking(const char* algorithm);
 void printBookings(const char* algorithm, int pipe_fd);
 bool validateDuration(float duration);
 const char* getAlgorithmName(int index);
+void fcfs_schedule_to_pipe(int pipe_fd);
+void shortest_job_first_to_pipe(int pipe_fd);
+void priority_schedule_to_pipe(int pipe_fd);
+
 Booking booking[MAX_BOOKINGS];
-PipePair pipes[MAX_ALGORITHMS];
 int booking_count = 0;
 
-
-
-int main() {
-    printf("~~Welcome to PolyU~~\n");
-
-    // Step 1: Initialize pipes
-    initializePipes();
-
-    // Step 2: Process user input
-    processInput(stdin, false);
-
-    // Step 3: Cleanup pipes
-    cleanupPipes();
-
-    return 0;
-}
-
-void initializePipes() {
-    for (int i = 0; i < MAX_ALGORITHMS; i++) {
-        if (pipe(&pipes[i].read_fd) == -1) { // Create a pipe
-            perror("pipe");
-            exit(EXIT_FAILURE);
-        }
-    }
-}
-void cleanupPipes() {
-    for (int i = 0; i < MAX_ALGORITHMS; i++) {
-        close(pipes[i].read_fd);
-        close(pipes[i].write_fd);
-    }
-}
 void processInput(FILE* input, bool isBatchFile) {
     char line[MAX_COMMAND_LENGTH];
     int lineCount = 0;
@@ -168,26 +139,45 @@ void processInput(FILE* input, bool isBatchFile) {
                     continue;
                 }
 
-                int pipe_idx = -1;
-                if (strcmp(algorithm, "fcfs") == 0) {
-                    pipe_idx = 0;
-                } else if (strcmp(algorithm, "sjf") == 0) {
-                    pipe_idx = 1;
-                } else if (strcmp(algorithm, "prio") == 0) {
-                    pipe_idx = 2;
-                } else if (strcmp(algorithm, "all") == 0) {
-                    for (int i = 0; i < MAX_ALGORITHMS; i++) {
-                        printf("\nPrinting schedule for all algorithms\n");
-                        printBookings(getAlgorithmName(i), pipes[i].read_fd);
-                    }
-                    continue;
-                } else {
-                    printf("Error: Unknown algorithm '%s'.\n", algorithm);
-                    continue;
+                int pipe_fd[2];
+                pid_t pid;
+                if (pipe(pipe_fd) == -1) {
+                    perror("pipe error");
+                    exit(EXIT_FAILURE);
                 }
-
-                if (pipe_idx != -1) {
-                    printBookings(algorithm, pipes[pipe_idx].read_fd);
+                pid = fork();
+                if (pid == -1) {
+                    perror("fork");
+                    exit(EXIT_FAILURE);
+                }
+                if (pid == 0) {
+                    close(pipe_fd[1]); // Close unused write end
+                    printBookings(algorithm, pipe_fd[0]);
+                    close(pipe_fd[0]);
+                }
+                else {
+                    if (strcmp(algorithm, "fcfs") == 0) {
+                        close(pipe_fd[0]);
+                        fcfs_schedule_to_pipe(pipe_fd[1]);
+                        close(pipe_fd[1]);
+                    }
+                    else if (strcmp(algorithm, "priority") == 0) {
+                        close(pipe_fd[0]);
+                        priority_schedule_to_pipe(pipe_fd[1]);
+                        close(pipe_fd[1]);
+                    }
+                    else if (strcmp(algorithm, "sjf") == 0) {
+                        close(pipe_fd[0]);
+                        shortest_job_first_to_pipe(pipe_fd[1]);
+                        close(pipe_fd[1]);
+                    }
+                    else if (strcmp(algorithm, "all") == 0) {
+                        close(pipe_fd[0]);
+                        fcfs_schedule_to_pipe(pipe_fd[1]);
+                        priority_schedule_to_pipe(pipe_fd[1]);
+                        shortest_job_first_to_pipe(pipe_fd[1]);
+                        close(pipe_fd[1]);
+                    }
                 }
         }
         else {
@@ -608,6 +598,246 @@ Schedule schedule[MAX_BOOKINGS];
 
 int schedule_count = 0;
 
+int convertTimeToInt(const char* time_str) {
+    int h,m;
+    sscanf(time_str, "%d:%d", &h, &m);
+    return h;
+}
+void fcfs_schedule_to_pipe(int pipe_fd) {
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for 3 parking slots
+    char buffer[256];
+
+    for (int i = 0; i < booking_count; i++) {
+        int assigned = 0;
+        int startTime = convertTimeToInt(bookings[i].time);
+        for (int j = 0; j < 3; j++) {
+            if (parking_slots[j] <= startTime) {
+                schedule[schedule_count].id = bookings[i].id;
+                schedule[schedule_count].parking_slot = j + 1;
+                schedule[schedule_count].start_time = startTime;
+                schedule[schedule_count].end_time = startTime + bookings[i].duration;
+                strcpy(schedule[schedule_count].status, "Scheduled");
+                parking_slots[j] = schedule[schedule_count].end_time;
+
+                // Write schedule to pipe
+                snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                         schedule[schedule_count].id,
+                         bookings[schedule_count].memberName,
+                         bookings[schedule_count].type,
+                         schedule[schedule_count].parking_slot,
+                         schedule[schedule_count].start_time,
+                         schedule[schedule_count].end_time,
+                         schedule[schedule_count].status);
+                write(pipe_fd, buffer, strlen(buffer));
+                schedule_count++;
+                assigned = 1;
+                break;
+            }
+        }
+        if (!assigned) {
+            schedule[schedule_count].id = bookings[i].id;
+            schedule[schedule_count].parking_slot = -1;
+            schedule[schedule_count].start_time = startTime;
+            schedule[schedule_count].end_time = startTime + bookings[i].duration;
+            strcpy(schedule[schedule_count].status, "Rejected");
+
+            // Write rejected schedule to pipe
+            snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                     schedule[schedule_count].id,
+                     bookings[schedule_count].memberName,
+                     bookings[schedule_count].type,
+                     schedule[schedule_count].parking_slot,
+                     schedule[schedule_count].start_time,
+                     schedule[schedule_count].end_time,
+                     schedule[schedule_count].status);
+            write(pipe_fd, buffer, strlen(buffer));
+            schedule_count++;
+        }
+    }
+}
+void shortest_job_first_to_pipe(int pipe_fd) {
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for 10 parking slots
+    char buffer[256];
+    int curr_time = 0;
+    int curr_scheduled = 0;
+    int is_scheduled[MAX_BOOKINGS] = {0};
+
+    // sort bookings in increasing order of start time, and if the same, in increasing order of duration
+    for (int i = 0; i < booking_count; i++) {
+        int startTime1 = convertTimeToInt(bookings[i].time);
+        for (int j = i+1; j < booking_count; j++) {
+            int startTime2 = convertTimeToInt(bookings[j].time);
+            if (startTime1 > startTime2 || 
+                (startTime1 == startTime2 && bookings[i].duration > bookings[j].duration)) {
+                    Booking temp = bookings[i];
+                    bookings[i] = bookings[j];
+                    bookings[j] = temp;
+            }
+        }
+    }
+
+    while (curr_scheduled < booking_count) {
+        int selected = -1; //selected booking to be scheduled
+        int min_duration = INF; //big number
+
+        //select a booking to be scheduled. It is like a selection sort.
+        for (int i = 0; i < booking_count; i++) {
+            int startTime = convertTimeToInt(bookings[i].time);
+            if (is_scheduled[i]) continue;
+            
+            if (startTime <= curr_time) {
+                if (bookings[i].duration < min_duration) {
+                    selected = i;
+                    min_duration = bookings[i].duration;
+                }
+            }
+        }
+
+        //when no schedule is selected for the current time, move the current time to the next schedule
+        if (selected == -1) {
+            int next_time = INF; //big number
+            for (int i = 0; i < booking_count; i++) {
+                int startTime = convertTimeToInt(bookings[i].time);
+                if (!is_scheduled[i] && startTime > curr_time) {
+                    if (startTime < next_time) {
+                        next_time = startTime;
+                    }
+                }
+            }
+            curr_time = next_time;
+            continue;
+        }
+
+        int is_assigned = 0;
+        int startTime = convertTimeToInt(bookings[selected].time);
+
+        for (int i = 0; i < TOTAL_PARKING_SLOTS; i++) {
+            if (parking_slots[i] <= startTime) {
+                schedule[schedule_count].id = bookings[selected].id;
+                schedule[schedule_count].parking_slot = i + 1;
+                schedule[schedule_count].start_time = startTime;
+                schedule[schedule_count].end_time = startTime + bookings[selected].duration;
+                strcpy(schedule[schedule_count].status, "Scheduled");
+                parking_slots[i] = schedule[schedule_count].end_time;
+
+                snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                         schedule[schedule_count].id,
+                         bookings[selected].memberName,
+                         bookings[selected].type,
+                         schedule[schedule_count].parking_slot,
+                         schedule[schedule_count].start_time,
+                         schedule[schedule_count].end_time,
+                         schedule[schedule_count].status);
+                write(pipe_fd, buffer, strlen(buffer));
+
+                schedule_count++;
+                is_scheduled[selected] = 1;
+                is_assigned = 1;
+                curr_scheduled++;
+                break;
+            }
+        }
+
+        //when rejected
+        if (!is_assigned) {
+            schedule[schedule_count].id = bookings[selected].id;
+            schedule[schedule_count].parking_slot = -1;
+            schedule[schedule_count].start_time = startTime;
+            schedule[schedule_count].end_time = startTime + bookings[selected].duration;
+            strcpy(schedule[schedule_count].status, "Rejected");
+
+            snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                     schedule[schedule_count].id,
+                     bookings[selected].memberName,
+                     bookings[selected].type,
+                     schedule[schedule_count].parking_slot,
+                     schedule[schedule_count].start_time,
+                     schedule[schedule_count].end_time,
+                     schedule[schedule_count].status);
+            write(pipe_fd, buffer, strlen(buffer));
+
+            schedule_count++;
+            is_scheduled[selected] = 1;
+            curr_scheduled++;
+        }
+    }
+}
+// Helper function to determine priority
+int get_priority(const char *type) {
+    if (strcmp(type, "Event") == 0) return 1;
+    if (strcmp(type, "Reservation") == 0) return 2;
+    if (strcmp(type, "Parking") == 0) return 3;
+    if (strcmp(type, "Essentials") == 0) return 4;
+    return 5; // Default priority for unknown types
+}
+
+void priority_schedule_to_pipe(int pipe_fd) {
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for 3 parking slots
+    char buffer[256];
+
+    // Sort bookings by priority (lower priority value = higher priority)
+    for (int i = 0; i < booking_count - 1; i++) {
+        for (int j = i + 1; j < booking_count; j++) {
+            if (get_priority(bookings[i].type) > get_priority(bookings[j].type)) {
+                Booking temp = bookings[i];
+                bookings[i] = bookings[j];
+                bookings[j] = temp;
+            }
+        }
+    }
+
+    // Schedule bookings based on priority
+    for (int i = 0; i < booking_count; i++) {
+        int assigned = 0;
+        int startTime = convertTimeToInt(bookings[i].time);
+        for (int j = 0; j < 3; j++) { // Check each parking slot
+
+            if (parking_slots[j] <= startTime) {
+                schedule[schedule_count].id = bookings[i].id;
+                schedule[schedule_count].parking_slot = j + 1;
+                schedule[schedule_count].start_time = startTime;
+                schedule[schedule_count].end_time = startTime + bookings[i].duration;
+                strcpy(schedule[schedule_count].status, "Scheduled");
+                parking_slots[j] = schedule[schedule_count].end_time;
+
+                // Write schedule to pipe
+                snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                         schedule[schedule_count].id,
+                         bookings[i].memberName,
+                         bookings[i].type,
+                         schedule[schedule_count].parking_slot,
+                         schedule[schedule_count].start_time,
+                         schedule[schedule_count].end_time,
+                         schedule[schedule_count].status);
+                write(pipe_fd, buffer, strlen(buffer));
+                schedule_count++;
+                assigned = 1;
+                break;
+            }
+        }
+        if (!assigned) { // If no slot is available, reject the booking
+            schedule[schedule_count].id = bookings[i].id;
+            schedule[schedule_count].parking_slot = -1;
+            schedule[schedule_count].start_time = startTime;
+            schedule[schedule_count].end_time = startTime + bookings[i].duration;
+            strcpy(schedule[schedule_count].status, "Rejected");
+
+            // Write rejected schedule to pipe
+            snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                     schedule[schedule_count].id,
+                     bookings[i].memberName,
+                     bookings[i].type,
+                     schedule[schedule_count].parking_slot,
+                     schedule[schedule_count].start_time,
+                     schedule[schedule_count].end_time,
+                     schedule[schedule_count].status);
+            write(pipe_fd, buffer, strlen(buffer));
+            schedule_count++;
+        }
+    }
+}
+
+
 //ex) member_A returns 0, member_C returns 2
 int get_index_from_member(char* member) {
     if (strncmp(member, "member_", 7) == 0) {
@@ -620,8 +850,8 @@ int get_index_from_member(char* member) {
 void parse_and_classify_line(const char* line) {
     Schedule s;
     Booking b;
-    if (sscanf(line, "%d %s %s %d %d %d %s %s",
-               &s.id, b.memberName, b.type, &s.parking_slot, &s.start_time, &s.end_time, s.status, b.date) != 8) {
+    if (sscanf(line, "%d %s %s %d %d %d %s",
+               &s.id, b.memberName, b.type, &s.parking_slot, &s.start_time, &s.end_time, s.status) != 7) {
         return;
     }
     int member_idx = get_index_from_member(b.memberName);
@@ -646,10 +876,10 @@ void printBookings(const char* algorithm, int pipe_fd) {
         buf_len += bytes_read;
         buffer[buf_len] = '\0';
 
-        char *line = strtok(buffer, '\n');
+        char *line = strtok(buffer, "\n");
         while (line != NULL) {
             parse_and_classify_line(line);
-            line = strtok(NULL, '\n');
+            line = strtok(NULL, "\n");
         }
         buf_len = 0;
     }
@@ -670,7 +900,7 @@ void printBookings(const char* algorithm, int pipe_fd) {
             Schedule s = accepted[i][j];
             Booking b = refer_booking[s.id];
 
-            printf("%-12s%-8d%-8s%-12s%-8d\n", b.date, s.start_time, s.end_time, b.type);
+            printf("%-12s%-8d%-8d%-8s\n", b.date, s.start_time, s.end_time, b.type);
         }
         printf("\n");
     }
@@ -688,8 +918,16 @@ void printBookings(const char* algorithm, int pipe_fd) {
             Schedule s = rejected[i][j];
             Booking b = refer_booking[s.id];
 
-            printf("%-12s%02d:00   %02d:00   %-20s\n", b.date, s.start_time, s.end_time, b.type);
+            printf("%-10s%-8d%-8d%-12s\n", b.date, s.start_time, s.end_time, b.type);
         }
         printf("\n");
     }
+}
+
+int main() {
+    printf("~~Welcome to PolyU~~\n");
+    
+    processInput(stdin,false);
+
+    return 0;
 }
