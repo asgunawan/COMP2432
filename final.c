@@ -84,6 +84,16 @@ pid_t fork_process();
 void handle_child_process(int pipe_fd[2], const char* algorithm);
 void handle_parent_process(int pipe_fd[2], void (*schedule_function)(int));
 
+void reset_global_variables() {
+    // Reset accepted and rejected schedules
+    for (int i = 0; i < NUM_OF_MEMBER; i++) {
+        accepted_count[i] = 0;
+        rejected_count[i] = 0;
+    }
+    // Reset the schedule count
+    schedule_count = 0;
+}
+
 // Utility Functions
 int convert_time_to_int(const char* time_str) {
     int h, m;
@@ -815,29 +825,55 @@ void processInput(FILE* input, bool isBatchFile) {
                     close(pipe_fd[0]);
                     fcfs_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
+                    wait(NULL);
                 } else if (strcmp(algorithm, "prio") == 0) {
                     close(pipe_fd[0]);
                     priority_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
+                    wait(NULL);
                 } else if (strcmp(algorithm, "sjf") == 0) {
                     close(pipe_fd[0]);
                     shortest_job_first_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
-                } else if (strcmp(algorithm, "all") == 0) {
-                    close(pipe_fd[0]);
-                    fcfs_schedule_to_pipe(pipe_fd[1]);
-                    close(pipe_fd[1]);
                     wait(NULL);
-                    close(pipe_fd[0]);
-                    priority_schedule_to_pipe(pipe_fd[1]);
-                    close(pipe_fd[1]);
-                    wait(NULL);
-                    close(pipe_fd[0]);
-                    shortest_job_first_to_pipe(pipe_fd[1]);
-                    close(pipe_fd[1]);
-
+                }  else if (strcmp(algorithm, "all") == 0) {
+                    const char* algorithms[] = {"fcfs", "prio", "sjf"};
+                    void (*functions[])(int) = {fcfs_schedule_to_pipe, priority_schedule_to_pipe, shortest_job_first_to_pipe};
+                
+                    for (int i = 0; i < 3; i++) {
+                        int pipe_fd[2];
+                        pid_t pid;
+                
+                        // Reset global variables before running each algorithm
+                        reset_global_variables();
+                
+                        // Initialize a new pipe for each algorithm
+                        if (pipe(pipe_fd) == -1) {
+                            perror("pipe error");
+                            exit(EXIT_FAILURE);
+                        }
+                
+                        pid = fork();
+                        if (pid == -1) {
+                            perror("fork error");
+                            exit(EXIT_FAILURE);
+                        }
+                
+                        if (pid == 0) {
+                            // Child process
+                            close(pipe_fd[1]); // Close unused write end
+                            printBookings(algorithms[i], pipe_fd[0]);
+                            close(pipe_fd[0]);
+                            exit(0);
+                        } else {
+                            // Parent process
+                            close(pipe_fd[0]); // Close unused read end
+                            functions[i](pipe_fd[1]); // Run the corresponding scheduling function
+                            close(pipe_fd[1]); // Close write end after writing
+                            wait(NULL); // Wait for the child process to finish
+                        }
+                    }
                 }
-                wait(NULL); // Wait for the child process to finish
             }
         } else {
             // Check the command type
@@ -871,4 +907,5 @@ int main() {
 // addBatch -correct_testing.dat;
 // printBookings -fcfs;
 //  printBookings -prio;
-//  printBookings -sjf;
+//  printBookings -sjf
+//  printBookings -all;
