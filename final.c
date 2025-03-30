@@ -815,7 +815,7 @@ void processInput(FILE* input, bool isBatchFile) {
                     close(pipe_fd[0]);
                     fcfs_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
-                } else if (strcmp(algorithm, "priority") == 0) {
+                } else if (strcmp(algorithm, "prio") == 0) {
                     close(pipe_fd[0]);
                     priority_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
@@ -826,9 +826,16 @@ void processInput(FILE* input, bool isBatchFile) {
                 } else if (strcmp(algorithm, "all") == 0) {
                     close(pipe_fd[0]);
                     fcfs_schedule_to_pipe(pipe_fd[1]);
+                    close(pipe_fd[1]);
+                    wait(NULL);
+                    close(pipe_fd[0]);
                     priority_schedule_to_pipe(pipe_fd[1]);
+                    close(pipe_fd[1]);
+                    wait(NULL);
+                    close(pipe_fd[0]);
                     shortest_job_first_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
+
                 }
                 wait(NULL); // Wait for the child process to finish
             }
@@ -858,17 +865,10 @@ int main() {
     // Allow user to input bookings interactively
     processInput(stdin, false);
 
-    // Example: Run FCFS scheduling
-    run_scheduling("fcfs", fcfs_schedule_to_pipe);
-
-    // Example: Run SJF scheduling
-    // run_scheduling("sjf", shortest_job_first_to_pipe);
-
-    // Example: Run Priority scheduling
-    // run_scheduling("priority", priority_schedule_to_pipe);
-
     return 0;
 }
 
 // addBatch -correct_testing.dat;
 // printBookings -fcfs;
+//  printBookings -prio;
+//  printBookings -sjf;
