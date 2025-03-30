@@ -570,8 +570,8 @@ void parse_and_classify_line(const char* line) {
 
 //add_booking("addParking -member_A 2025-05-10 08:00 3.0 battery cable;");
 void printBookings(const char* algorithm, int pipe_fd) {
-    char buffer[1024];
-    char temp[1024] = "";
+    char buffer[4096];
+    char temp[4096] = "";
     int bytes_read;
 
     //read lines from parent
