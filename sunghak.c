@@ -275,7 +275,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
     // Sort bookings by priority (lower priority value = higher priority)
     for (int i = 0; i < booking_count - 1; i++) {
         for (int j = i + 1; j < booking_count; j++) {
-            if (strcmp(bookings[i].type, bookings[j].type) > 0) {
+            if (get_priority(bookings[i].type) > get_priority(bookings[j].type)) {
                 Booking temp = bookings[i];
                 bookings[i] = bookings[j];
                 bookings[j] = temp;
@@ -286,26 +286,36 @@ void priority_schedule_to_pipe(int pipe_fd) {
     // Schedule bookings based on priority
     for (int i = 0; i < booking_count; i++) {
         int assigned = 0;
-        int start_time = convert_time_to_int(bookings[i].time); // Calculate start time
+        int startTime = convertTimeToInt(bookings[i].time);
 
-        for (int j = 0; j < 3; j++) { // Check each parking slot
-            if (parking_slots[j] <= start_time) {
+        for (int j = 0; j < TOTAL_PARKING_SLOTS; j++) { // Check each parking slot
+            if (parking_slots[j] <= startTime) {
                 schedule[schedule_count].id = bookings[i].id;
                 schedule[schedule_count].parking_slot = j + 1;
-                schedule[schedule_count].start_time = start_time;
-                schedule[schedule_count].end_time = start_time + bookings[i].duration;
+                schedule[schedule_count].start_time = startTime;
+                schedule[schedule_count].end_time = startTime + bookings[i].duration;
                 strcpy(schedule[schedule_count].status, "Scheduled");
                 parking_slots[j] = schedule[schedule_count].end_time;
 
-                // Write schedule to pipe
-                snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+                // Write schedule to pipe, including facilities
+                snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s ",
                          schedule[schedule_count].id,
-                         bookings[i].client,
+                         bookings[i].memberName,
                          bookings[i].type,
                          schedule[schedule_count].parking_slot,
                          schedule[schedule_count].start_time,
                          schedule[schedule_count].end_time,
                          schedule[schedule_count].status);
+
+                // Append facilities to the buffer
+                for (int k = 0; k < bookings[i].facilityCount; k++) {
+                    strncat(buffer, bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
+                    if (k < bookings[i].facilityCount - 1) {
+                        strncat(buffer, ",", sizeof(buffer) - strlen(buffer) - 1); // Add a comma between facilities
+                    }
+                }
+                strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1); // Add a newline at the end
+
                 write(pipe_fd, buffer, strlen(buffer));
                 schedule_count++;
                 assigned = 1;
@@ -315,19 +325,29 @@ void priority_schedule_to_pipe(int pipe_fd) {
         if (!assigned) { // If no slot is available, reject the booking
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
-            schedule[schedule_count].start_time = start_time;
-            schedule[schedule_count].end_time = start_time + bookings[i].duration;
+            schedule[schedule_count].start_time = startTime;
+            schedule[schedule_count].end_time = startTime + bookings[i].duration;
             strcpy(schedule[schedule_count].status, "Rejected");
 
-            // Write rejected schedule to pipe
-            snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s\n",
+            // Write rejected schedule to pipe, including facilities
+            snprintf(buffer, sizeof(buffer), "%d %s %s %d %d %d %s ",
                      schedule[schedule_count].id,
-                     bookings[i].client,
+                     bookings[i].memberName,
                      bookings[i].type,
                      schedule[schedule_count].parking_slot,
                      schedule[schedule_count].start_time,
                      schedule[schedule_count].end_time,
                      schedule[schedule_count].status);
+
+            // Append facilities to the buffer
+            for (int k = 0; k < bookings[i].facilityCount; k++) {
+                strncat(buffer, bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
+                if (k < bookings[i].facilityCount - 1) {
+                    strncat(buffer, ",", sizeof(buffer) - strlen(buffer) - 1); // Add a comma between facilities
+                }
+            }
+            strncat(buffer, "\n", sizeof(buffer) - strlen(buffer) - 1); // Add a newline at the end
+
             write(pipe_fd, buffer, strlen(buffer));
             schedule_count++;
         }

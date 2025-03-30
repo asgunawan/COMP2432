@@ -71,6 +71,7 @@ int booking_count = 0;
 
 int main() {
     printf("~~Welcome to PolyU~~\n");
+    processInput(stdin, false);
 
     return 0;
 }
