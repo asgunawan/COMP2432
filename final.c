@@ -90,18 +90,29 @@ void initialize_pipe(int pipe_fd[2]);
 pid_t fork_process();
 void handle_child_process(int pipe_fd[2], const char* algorithm);
 void handle_parent_process(int pipe_fd[2], void (*schedule_function)(int));
-void reset_global_variables();
+void reset_global_variables(bool reset_summary);
 void generate_performance_report();
 bool check_and_reserve_facilities(Booking* b);
 
-void reset_global_variables() {
+void reset_global_variables(bool reset_summary) {
     // Reset accepted and rejected schedules
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
         accepted_count[i] = 0;
         rejected_count[i] = 0;
     }
-    // Reset the schedule count
+
+    // Reset schecdule
     schedule_count = 0;
+
+    // Reset facility availability
+    for (int i = 0; i < MAX_FACILITIES; i++) {
+        facility_availability[i] = 3; // Reset to initial availability (3 of each facility)
+    }
+
+    // Reset summary metrics only if specified
+    if (reset_summary) {
+        memset(summary, 0, sizeof(summary));
+    }
 }
 
 void generate_performance_report() {
@@ -142,7 +153,7 @@ int get_priority(const char* type) {
     if (strcmp(type, "Reservation") == 0) return 2;
     if (strcmp(type, "Parking") == 0) return 3;
     if (strcmp(type, "Essentials") == 0) return 4;
-    return 5; // Default priority for unknown types
+    return 5; 
 }
 
 int get_index_from_member(char* member) {
@@ -179,14 +190,14 @@ bool validateCommandFormat(const char* command, CommandType cmdType) {
         case CMD_ADD_RESERVATION:
         case CMD_ADD_EVENT:
         case CMD_BOOK_ESSENTIALS:
-            return (strchr(command, '-') != NULL); // Check for a dash (-)
+            return (strchr(command, '-') != NULL); 
         default:
             return false;
     }
 }
 
 void processBooking(const char* command) {
-    add_booking(command, booking_count); // Use the existing add_booking function
+    add_booking(command, booking_count); 
 }
 
 bool check_and_reserve_facilities(Booking* b) {
@@ -203,12 +214,12 @@ bool check_and_reserve_facilities(Booking* b) {
         }
 
         if (facility_index == -1 || temp_availability[facility_index] <= 0) {
-            return false; // Facility not available
+            return false; 
         }
 
         // Reserve the facility and its pair
         temp_availability[facility_index]--;
-        if (facility_index % 2 == 0) { // Pairing logic: battery + cable, locker + umbrella, etc.
+        if (facility_index % 2 == 0) { // Pairing logic: battery + cable, locker + umbrella, etc according to rules.
             temp_availability[facility_index + 1]--;
         } else {
             temp_availability[facility_index - 1]--;
@@ -248,10 +259,8 @@ void add_booking(const char* command, int id) {
         return;
     }
 
-    // Add ID
-    b->id = id;
-
     // Parse facilities
+    b->id = id;
     b->facility_count = 0;
     char* facility = strtok(facilities, " ");
     while (facility && b->facility_count < MAX_FACILITIES) {
@@ -265,17 +274,16 @@ void add_booking(const char* command, int id) {
 }
 
 void fcfs_schedule_to_pipe(int pipe_fd) {
-    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for parking slots
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0};
     char buffer[256];
 
     for (int i = 0; i < booking_count; i++) {
-        summary[0][0]++; // Increment total bookings for FCFS
+        summary[0][0]++; 
         int assigned = 0;
-        int start_time = convert_time_to_int(bookings[i].time); // Calculate start time
+        int start_time = convert_time_to_int(bookings[i].time); 
 
-        // Check facility availability
+        // Check facility availability and reject if no avaliable according to the rules (3 facilities)
         if (!check_and_reserve_facilities(&bookings[i])) {
-            // Reject booking due to unavailable facilities
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -299,7 +307,7 @@ void fcfs_schedule_to_pipe(int pipe_fd) {
                      schedule[schedule_count].status);
             write(pipe_fd, buffer, strlen(buffer));
             schedule_count++;
-            summary[0][2]++; // Increment rejected bookings for FCFS
+            summary[0][2]++; 
             continue;
         }
 
@@ -330,14 +338,14 @@ void fcfs_schedule_to_pipe(int pipe_fd) {
                          schedule[schedule_count].status);
                 write(pipe_fd, buffer, strlen(buffer));
                 schedule_count++;
-                summary[0][1]++; // Increment assigned bookings for FCFS
+                summary[0][1]++; 
                 assigned = 1;
                 break;
             }
         }
 
         if (!assigned) { // If no slot is available, reject the booking
-            release_facilities(&bookings[i]); // Release reserved facilities
+            release_facilities(&bookings[i]); 
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -361,24 +369,24 @@ void fcfs_schedule_to_pipe(int pipe_fd) {
                      schedule[schedule_count].status);
             write(pipe_fd, buffer, strlen(buffer));
             schedule_count++;
-            summary[0][2]++; // Increment rejected bookings for FCFS
+            summary[0][2]++;
         }
     }
 }
 
-// Updated dummy data to match the new format. semicolon is removed.
-void load_dummy_data() {
-    int id = 0;
-    add_booking("addParking -member_A 2025-05-12 08:00 3.0 battery cable", id++);
-    add_booking("addParking -member_B 2025-05-10 08:00 3.0 battery cable", id++);
-    add_booking("addReservation -member_C 2025-05-10 08:00 3.0 battery cable", id++);
-    add_booking("addEssentials -member_D 2025-05-10 09:00 2.0 battery", id++);
-    add_booking("addEvent -member_E 2025-05-10 11:00 3.0 umbrella valetpark", id++);
-    add_booking("addParking -member_A 2025-05-10 12:00 2.0 battery cable", id++);
-}
+// DEBUG: Short dummy data
+// void load_dummy_data() {
+//     int id = 0;
+//     add_booking("addParking -member_A 2025-05-12 08:00 3.0 battery cable", id++);
+//     add_booking("addParking -member_B 2025-05-10 08:00 3.0 battery cable", id++);
+//     add_booking("addReservation -member_C 2025-05-10 08:00 3.0 battery cable", id++);
+//     add_booking("addEssentials -member_D 2025-05-10 09:00 2.0 battery", id++);
+//     add_booking("addEvent -member_E 2025-05-10 11:00 3.0 umbrella valetpark", id++);
+//     add_booking("addParking -member_A 2025-05-10 12:00 2.0 battery cable", id++);
+// }
 
 void shortest_job_first_to_pipe(int pipe_fd) {
-    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for parking slots
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0};
     char buffer[256];
     int curr_time = 0;
     int curr_scheduled = 0;
@@ -402,7 +410,7 @@ void shortest_job_first_to_pipe(int pipe_fd) {
     }
 
     while (curr_scheduled < booking_count) {
-        int selected = -1; // Selected booking to be scheduled
+        int selected = -1; 
         int min_duration = INF; // Big number
 
         // Select a booking to be scheduled
@@ -433,13 +441,12 @@ void shortest_job_first_to_pipe(int pipe_fd) {
             continue;
         }
 
-        summary[2][0]++; // Increment total bookings for SJF
+        summary[2][0]++;
         int is_assigned = 0;
         int start_time = convert_time_to_int(bookings[selected].time);
 
-        // Check facility availability
+        // Check facility availability and reject if no avaliable according to the rules (3 facilities)
         if (!check_and_reserve_facilities(&bookings[selected])) {
-            // Reject booking due to unavailable facilities
             schedule[schedule_count].id = bookings[selected].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -466,7 +473,7 @@ void shortest_job_first_to_pipe(int pipe_fd) {
             schedule_count++;
             is_scheduled[selected] = 1;
             curr_scheduled++;
-            summary[2][2]++; // Increment rejected bookings for SJF
+            summary[2][2]++; 
             continue;
         }
 
@@ -500,19 +507,19 @@ void shortest_job_first_to_pipe(int pipe_fd) {
                 is_scheduled[selected] = 1;
                 is_assigned = 1;
                 curr_scheduled++;
-                summary[2][1]++; // Increment assigned bookings for SJF
+                summary[2][1]++;
                 break;
             }
         }
 
         if (!is_assigned) {
-            release_facilities(&bookings[selected]); // Release reserved facilities
+            release_facilities(&bookings[selected]);
         }
     }
 }
 
 void priority_schedule_to_pipe(int pipe_fd) {
-    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; // Track end times for parking slots
+    int parking_slots[TOTAL_PARKING_SLOTS] = {0}; 
     char buffer[256];
 
     // Sort bookings by priority (lower priority value = higher priority)
@@ -527,14 +534,13 @@ void priority_schedule_to_pipe(int pipe_fd) {
     }
 
     for (int i = 0; i < booking_count; i++) {
-        summary[1][0]++; // Increment total bookings for PRIO
+        summary[1][0]++;
         int assigned = 0;
         int start_time = convert_time_to_int(bookings[i].time);
         int end_time = start_time + bookings[i].duration;
 
-        // Check facility availability
+        // Check facility availability and reject if no avaliable according to the rules (3 facilities)
         if (!check_and_reserve_facilities(&bookings[i])) {
-            // Reject booking due to unavailable facilities
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -559,7 +565,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
             write(pipe_fd, buffer, strlen(buffer));
 
             schedule_count++;
-            summary[1][2]++; // Increment rejected bookings for PRIO
+            summary[1][2]++; 
             continue;
         }
 
@@ -592,26 +598,26 @@ void priority_schedule_to_pipe(int pipe_fd) {
                 write(pipe_fd, buffer, strlen(buffer));
 
                 schedule_count++;
-                summary[1][1]++; // Increment assigned bookings for PRIO
+                summary[1][1]++; 
                 assigned = 1;
                 break;
             }
         }
 
-        // If no slot is available, displace a lower-priority booking
+        // If no slot, displace a lower prio booking
         if (!assigned) {
             for (int j = 0; j < schedule_count; j++) {
                 Schedule* s = &schedule[j];
                 Booking* b = &refer_booking[s->id];
 
                 if (get_priority(bookings[i].type) < get_priority(b->type)) {
-                    // Displace the lower-priority booking
-                    release_facilities(b); // Release facilities of the displaced booking
-                    s->parking_slot = -1; // Mark as rejected
+                    // Displace the lower-priority booking, release, then mark that its rejected
+                    release_facilities(b); 
+                    s->parking_slot = -1; 
                     strcpy(s->status, "Rejected");
-                    summary[1][2]++; // Increment rejected bookings for PRIO
+                    summary[1][2]++;
 
-                    // Assign the higher-priority booking to the slot
+                    // Assign the higher-priority booking
                     schedule[schedule_count].id = bookings[i].id;
                     schedule[schedule_count].parking_slot = s->parking_slot;
                     schedule[schedule_count].start_time = start_time;
@@ -637,7 +643,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
                     write(pipe_fd, buffer, strlen(buffer));
 
                     schedule_count++;
-                    summary[1][1]++; // Increment assigned bookings for PRIO
+                    summary[1][1]++;
                     assigned = 1;
                     break;
                 }
@@ -646,7 +652,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
 
         // If still not assigned, reject the booking
         if (!assigned) {
-            release_facilities(&bookings[i]); // Release reserved facilities
+            release_facilities(&bookings[i]); 
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -671,7 +677,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
             write(pipe_fd, buffer, strlen(buffer));
 
             schedule_count++;
-            summary[1][2]++; // Increment rejected bookings for PRIO
+            summary[1][2]++; 
         }
     }
 }
@@ -746,6 +752,7 @@ void parse_and_classify_line(const char* line) {
         rejected[member_idx][rejected_count[member_idx]++] = s;
     }
 
+    // DEBUG: is the data correct?
     // printf("ID: %d\n", b.id);
     // printf("Client: %s\n", b.client);
     // printf("Type: %s\n", b.type);
@@ -768,13 +775,13 @@ void printBookings(const char* algorithm, int pipe_fd) {
     char temp[4096] = "";
     int bytes_read;
 
-    //read lines from parent
+    // Read lines from parent
     while ((bytes_read = read(pipe_fd, buffer, sizeof(buffer) - 1)) > 0) {
         buffer[bytes_read] = '\0';
         strcat(temp, buffer);
 
         char* newline;
-        //find '\n' to check if there is new line
+
         while ((newline = strchr(temp, '\n')) != NULL) {
             *newline = '\0';
             parse_and_classify_line(temp);
@@ -783,7 +790,7 @@ void printBookings(const char* algorithm, int pipe_fd) {
         }
     }
 
-    //accepted bookings
+    // Accepted Bookings
     printf("\n*** Parking Booking - ACCEPTED / %s ***\n\n", algorithm);
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
         printf("Member_%c has the following bookings:\n\n", 'A' + i);
@@ -808,14 +815,14 @@ void printBookings(const char* algorithm, int pipe_fd) {
                 }
             }
             else {
-                printf("%s\n", "*"); // no facility
+                printf("%s\n", "*"); // IF NO FACILTY
             }
             
         }
         printf("\n");
     }
 
-    //rejected bookings
+    // Print Rejected bookings
     printf("\n*** Parking Booking - REJECTED / %s ***\n\n", algorithm);
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
         if (rejected_count[i] == 0) continue;
@@ -837,74 +844,70 @@ void printBookings(const char* algorithm, int pipe_fd) {
                 }
             }
             else {
-                printf("%s\n", "*"); // no facility
+                printf("%s\n", "*"); // IF NO FACILITY
             }
         }
         printf("\n");
     }
 }
 
-// Function to initialize the pipe
-void initialize_pipe(int pipe_fd[2]) {
-    if (pipe(pipe_fd) == -1) {
-        perror("pipe");
-        exit(EXIT_FAILURE);
-    }
-}
+// DEBUG: run dummy data thing 
+// // Function to initialize the pipe
+// void initialize_pipe(int pipe_fd[2]) {
+//     if (pipe(pipe_fd) == -1) {
+//         perror("pipe");
+//         exit(EXIT_FAILURE);
+//     }
+// }
 
-// Function to fork the process
-pid_t fork_process() {
-    pid_t pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-    return pid;
-}
+// // Function to fork the process
+// pid_t fork_process() {
+//     pid_t pid = fork();
+//     if (pid == -1) {
+//         perror("fork");
+//         exit(EXIT_FAILURE);
+//     }
+//     return pid;
+// }
 
-// Function to handle the child process
-void handle_child_process(int pipe_fd[2], const char* algorithm) {
-    close(pipe_fd[1]); // Close unused write end
-    printBookings(algorithm, pipe_fd[0]);
-    close(pipe_fd[0]);
-    exit(0); // Exit the child process
-}
+// void handle_child_process(int pipe_fd[2], const char* algorithm) {
+//     close(pipe_fd[1]); // Close unused write end
+//     printBookings(algorithm, pipe_fd[0]);
+//     close(pipe_fd[0]);
+//     exit(0); // Exit the child process
+// }
 
-// Function to handle the parent process
-void handle_parent_process(int pipe_fd[2], void (*schedule_function)(int)) {
-    close(pipe_fd[0]); // Close unused read end
-    schedule_function(pipe_fd[1]);
-    close(pipe_fd[1]);
-    wait(NULL); // Wait for the child process to finish
-}
+// void handle_parent_process(int pipe_fd[2], void (*schedule_function)(int)) {
+//     close(pipe_fd[0]); 
+//     schedule_function(pipe_fd[1]);
+//     close(pipe_fd[1]);
+//     wait(NULL); 
+// }
 
-// Function to load dummy data and run the scheduling logic
-void run_scheduling(const char* algorithm, void (*schedule_function)(int)) {
-    int pipe_fd[2];
-    pid_t pid;
+// DEBUG: run dummy data thing 
+// void run_scheduling(const char* algorithm, void (*schedule_function)(int)) {
+//     int pipe_fd[2];
+//     pid_t pid;
 
-    // Load dummy data
-    load_dummy_data();
+//     // Load dummy data
+//     load_dummy_data();
 
-    // Initialize the pipe
-    initialize_pipe(pipe_fd);
+//     // Initialize the pipe
+//     initialize_pipe(pipe_fd);
 
-    // Fork the process
-    pid = fork_process();
+//     // Fork the process
+//     pid = fork_process();
 
-    if (pid == 0) {
-        // Child process
-        handle_child_process(pipe_fd, algorithm);
-    } else {
-        // Parent process
-        handle_parent_process(pipe_fd, schedule_function);
-    }
-}
+//     if (pid == 0) {
+//         handle_child_process(pipe_fd, algorithm);
+//     } else {
+//         handle_parent_process(pipe_fd, schedule_function);
+//     }
+// }
 
 void trim_whitespace(char* str) {
     char* end;
 
-    // Trim trailing whitespace
     end = str + strlen(str) - 1;
     while (end > str && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
         *end = '\0';
@@ -921,29 +924,25 @@ void processInput(FILE* input, bool isBatchFile) {
             printf("Please enter booking:\n");
         }
 
-        // Read input until a newline character
+        // Input processing, read until white line, trim the whitespace, and skip emtpy lines
         if (fgets(line, sizeof(line), input) == NULL) {
-            break; // Exit loop on read failure
+            break; 
         }
 
-        // Trim trailing whitespace
         trim_whitespace(line);
 
-        // Debug: Print the trimmed line
-        printf("Trimmed line: '%s'\n", line);
-
-        // Skip empty lines
         if (strlen(line) == 0) {
             continue;
         }
 
-        // Check if command ends with a semicolon
+        // // Debug: is line correct??
+        // printf("Trimmed line: '%s'\n", line);
+
+        // Semicolon Logic
         if (line[strlen(line) - 1] != ';') {
             printf("Error: Command must end with a semicolon (;).\n");
             continue;
         }
-
-        // Remove the semicolon
         line[strlen(line) - 1] = '\0';
 
         // Process other command logic
@@ -960,7 +959,7 @@ void processInput(FILE* input, bool isBatchFile) {
 
             char* filename = strchr(line, '-');
             if (filename) {
-                filename++; // Skip '-'
+                filename++;
                 FILE* batchFile = fopen(filename, "r");
                 if (!batchFile) {
                     printf("Error: Cannot open batch file: %s\n", filename);
@@ -997,43 +996,52 @@ void processInput(FILE* input, bool isBatchFile) {
                 perror("fork");
                 exit(EXIT_FAILURE);
             }
+
             if (pid == 0) {
-                // Child process
-                close(pipe_fd[1]); // Close unused write end
+                // Child process (print the booking)
+                close(pipe_fd[1]);
                 printBookings(algorithm, pipe_fd[0]);
                 close(pipe_fd[0]);
                 exit(0);
             } else {
-                // Parent process
+                // Parent process (run the scheduling algorithm)
+
+                // Logic for manual algorithms
                 if (strcmp(algorithm, "fcfs") == 0) {
+                    reset_global_variables(true);
                     close(pipe_fd[0]);
                     fcfs_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
                     wait(NULL);
                 } else if (strcmp(algorithm, "prio") == 0) {
+                    reset_global_variables(true);
                     close(pipe_fd[0]);
                     priority_schedule_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
                     wait(NULL);
                 } else if (strcmp(algorithm, "sjf") == 0) {
+                    reset_global_variables(true);
                     close(pipe_fd[0]);
                     shortest_job_first_to_pipe(pipe_fd[1]);
                     close(pipe_fd[1]);
                     wait(NULL);
-                } else if (strcmp(algorithm, "all") == 0) {
+                }  
+                // Logic for running all algorithms
+                else if (strcmp(algorithm, "all") == 0) {
                     const char* algorithms[] = {"fcfs", "prio", "sjf"};
                     void (*functions[])(int) = {fcfs_schedule_to_pipe, priority_schedule_to_pipe, shortest_job_first_to_pipe};
                 
+                    // Reset the summary array at the start of the ALL command
+                    memset(summary, 0, sizeof(summary));
+
                     for (int i = 0; i < 3; i++) {
                         int pipe_fd[2];
                         pid_t pid;
                 
-                        // Reset global variables before running each algorithm
-                        reset_global_variables();
-                
-                        // Reset facility availability
+                        // Reset global variables 
+                        reset_global_variables(false);
                         for (int j = 0; j < MAX_FACILITIES; j++) {
-                            facility_availability[j] = 3; // Reset to initial availability (3 of each facility)
+                            facility_availability[j] = 3;
                         }
                 
                         // Initialize a new pipe for each algorithm
@@ -1041,45 +1049,40 @@ void processInput(FILE* input, bool isBatchFile) {
                             perror("pipe error");
                             exit(EXIT_FAILURE);
                         }
-                
                         pid = fork();
                         if (pid == -1) {
                             perror("fork error");
                             exit(EXIT_FAILURE);
                         }
-                
                         if (pid == 0) {
-                            // Child process
-                            close(pipe_fd[1]); // Close unused write end
+                            // Print the booking
+                            close(pipe_fd[1]); 
                             printBookings(algorithms[i], pipe_fd[0]);
                             close(pipe_fd[0]);
                             exit(0);
                         } else {
-                            // Parent process
-                            close(pipe_fd[0]); // Close unused read end
-                            functions[i](pipe_fd[1]); // Run the corresponding scheduling function
-                            close(pipe_fd[1]); // Close write end after writing
-                            wait(NULL); // Wait for the child process to finish
+                            // Run each functions, "fcfs", "prio", "sjf"};
+                            close(pipe_fd[0]); 
+                            functions[i](pipe_fd[1]); 
+                            close(pipe_fd[1]); 
+                            wait(NULL); 
                         }
                     }
                     generate_performance_report();
                 }
             }
         } else {
-            // Check the command type
+            // Validation logic
             CommandType cmdType = parseCommandType(line);
             if (cmdType == CMD_INVALID) {
                 printf("Error: Invalid command type\n");
                 continue;
             }
 
-            // Validate command format
             if (!validateCommandFormat(line, cmdType)) {
                 printf("Error: Invalid command format\n");
                 continue;
             }
-
-            // Process the valid command
             processBooking(line);
         }
     }
@@ -1088,7 +1091,7 @@ void processInput(FILE* input, bool isBatchFile) {
 int main() {
     printf("~~ Welcome to PolyU Smart Parking Management System ~~\n");
 
-    // Allow user to input bookings interactively
+    // Start the user input
     processInput(stdin, false);
 
     return 0;
