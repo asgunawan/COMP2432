@@ -95,6 +95,7 @@ void reset_global_variables(bool reset_summary);
 void generate_performance_report();
 bool check_and_reserve_facilities(Booking* b);
 
+
 void reset_global_variables(bool reset_summary) {
     // Reset accepted and rejected schedules
     for (int i = 0; i < NUM_OF_MEMBER; i++) {
@@ -237,6 +238,7 @@ void release_facilities(Booking* b) {
         for (int j = 0; j < MAX_FACILITIES; j++) {
             if (strcmp(b->facilities[i], facility_names[j]) == 0) {
                 facility_availability[j]++;
+                printf("Facility released: %s (Remaining: %d)\n", facility_names[j], facility_availability[j]); // Debug
                 break;
             }
         }
@@ -322,6 +324,8 @@ void fcfs_schedule_to_pipe(int pipe_fd) {
                 strcpy(schedule[schedule_count].status, "Scheduled");
                 parking_slots[j] = schedule[schedule_count].end_time;
 
+                release_facilities(&bookings[i]);
+
                 snprintf(buffer, sizeof(buffer), "%d %s %s %s %s %.2f %d",
                          schedule[schedule_count].id,
                          bookings[i].client,
@@ -389,82 +393,51 @@ void fcfs_schedule_to_pipe(int pipe_fd) {
 void shortest_job_first_to_pipe(int pipe_fd) {
     int parking_slots[TOTAL_PARKING_SLOTS] = {0};
     char buffer[256];
-    int curr_time = 0;
-    int curr_scheduled = 0;
-    int is_scheduled[MAX_BOOKINGS] = {0};
 
-    // Sort bookings in increasing order of date, start time, and duration.
-    for (int i = 0; i < booking_count; i++) {
+    // Create a local copy of the bookings array
+    Booking local_bookings[MAX_BOOKINGS];
+    memcpy(local_bookings, bookings, sizeof(bookings));
+
+    // Sort the local copy by start time and duration
+    for (int i = 0; i < booking_count - 1; i++) {
         for (int j = i + 1; j < booking_count; j++) {
-            int start_time_i = convert_time_to_int(bookings[i].time);
-            int start_time_j = convert_time_to_int(bookings[j].time);
-            int date_i = convert_date_to_int(bookings[i].date);
-            int date_j = convert_date_to_int(bookings[j].date);
-
-            if (date_i > date_j || (date_i == date_j && start_time_i > start_time_j) || 
-                (date_i == date_j && start_time_i == start_time_j && bookings[i].duration > bookings[j].duration)) {
-                Booking temp = bookings[i];
-                bookings[i] = bookings[j];
-                bookings[j] = temp;
+            if (convert_time_to_int(local_bookings[i].time) > convert_time_to_int(local_bookings[j].time) ||
+                (convert_time_to_int(local_bookings[i].time) == convert_time_to_int(local_bookings[j].time) &&
+                 local_bookings[i].duration > local_bookings[j].duration)) {
+                Booking temp = local_bookings[i];
+                local_bookings[i] = local_bookings[j];
+                local_bookings[j] = temp;
             }
         }
     }
 
-    while (curr_scheduled < booking_count) {
-        int selected = -1; 
-        int min_duration = INF; // Big number
-
-        // Select a booking to be scheduled
-        for (int i = 0; i < booking_count; i++) {
-            if (is_scheduled[i]) continue;
-
-            int start_time = convert_time_to_int(bookings[i].time);
-            if (start_time <= curr_time) {
-                if (bookings[i].duration < min_duration) {
-                    selected = i;
-                    min_duration = bookings[i].duration;
-                }
-            }
-        }
-
-        // When no schedule is selected for the current time, move the current time to the next schedule
-        if (selected == -1) {
-            int next_time = INF; // Big number
-            for (int i = 0; i < booking_count; i++) {
-                int start_time = convert_time_to_int(bookings[i].time);
-                if (!is_scheduled[i] && start_time > curr_time) {
-                    if (start_time < next_time) {
-                        next_time = start_time;
-                    }
-                }
-            }
-            curr_time = next_time;
-            continue;
-        }
-
+    // Schedule bookings using the sorted local copy
+    for (int i = 0; i < booking_count; i++) {
         summary[2][0]++;
-        int is_assigned = 0;
-        int start_time = convert_time_to_int(bookings[selected].time);
+        int assigned = 0;
+        int start_time = convert_time_to_int(local_bookings[i].time);
+        int end_time = start_time + local_bookings[i].duration;
 
-        // Check facility availability and reject if no avaliable according to the rules (3 facilities)
-        if (!check_and_reserve_facilities(&bookings[selected])) {
-            schedule[schedule_count].id = bookings[selected].id;
+        // Check facility availability and reject if unavailable
+        if (!check_and_reserve_facilities(&local_bookings[i])) {
+            release_facilities(&local_bookings[i]);
+            schedule[schedule_count].id = local_bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
-            schedule[schedule_count].end_time = start_time + bookings[selected].duration;
+            schedule[schedule_count].end_time = end_time;
             strcpy(schedule[schedule_count].status, "Rejected");
 
             snprintf(buffer, sizeof(buffer), "%d %s %s %s %s %.2f %d",
                      schedule[schedule_count].id,
-                     bookings[selected].client,
-                     bookings[selected].type,
-                     bookings[selected].date,
-                     bookings[selected].time,
-                     bookings[selected].duration,
-                     bookings[selected].facility_count);
-            for (int k = 0; k < bookings[selected].facility_count; k++) {
+                     local_bookings[i].client,
+                     local_bookings[i].type,
+                     local_bookings[i].date,
+                     local_bookings[i].time,
+                     local_bookings[i].duration,
+                     local_bookings[i].facility_count);
+            for (int k = 0; k < local_bookings[i].facility_count; k++) {
                 strncat(buffer, " ", sizeof(buffer) - strlen(buffer) - 1);
-                strncat(buffer, bookings[selected].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, local_bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
             }
             snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %d %s\n",
                      schedule[schedule_count].parking_slot,
@@ -472,32 +445,34 @@ void shortest_job_first_to_pipe(int pipe_fd) {
             write(pipe_fd, buffer, strlen(buffer));
 
             schedule_count++;
-            is_scheduled[selected] = 1;
-            curr_scheduled++;
-            summary[2][2]++; 
+            summary[2][2]++;
             continue;
         }
 
-        for (int i = 0; i < TOTAL_PARKING_SLOTS; i++) {
-            if (parking_slots[i] <= start_time) {
-                schedule[schedule_count].id = bookings[selected].id;
-                schedule[schedule_count].parking_slot = i + 1;
+        // Check parking slot availability
+        for (int j = 0; j < TOTAL_PARKING_SLOTS; j++) {
+            if (parking_slots[j] <= start_time) {
+                // Assign the booking to the slot
+                schedule[schedule_count].id = local_bookings[i].id;
+                schedule[schedule_count].parking_slot = j + 1;
                 schedule[schedule_count].start_time = start_time;
-                schedule[schedule_count].end_time = start_time + bookings[selected].duration;
+                schedule[schedule_count].end_time = end_time;
                 strcpy(schedule[schedule_count].status, "Scheduled");
-                parking_slots[i] = schedule[schedule_count].end_time;
+                parking_slots[j] = end_time;
+
+                release_facilities(&local_bookings[i]);
 
                 snprintf(buffer, sizeof(buffer), "%d %s %s %s %s %.2f %d",
                          schedule[schedule_count].id,
-                         bookings[selected].client,
-                         bookings[selected].type,
-                         bookings[selected].date,
-                         bookings[selected].time,
-                         bookings[selected].duration,
-                         bookings[selected].facility_count);
-                for (int k = 0; k < bookings[selected].facility_count; k++) {
+                         local_bookings[i].client,
+                         local_bookings[i].type,
+                         local_bookings[i].date,
+                         local_bookings[i].time,
+                         local_bookings[i].duration,
+                         local_bookings[i].facility_count);
+                for (int k = 0; k < local_bookings[i].facility_count; k++) {
                     strncat(buffer, " ", sizeof(buffer) - strlen(buffer) - 1);
-                    strncat(buffer, bookings[selected].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
+                    strncat(buffer, local_bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
                 }
                 snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %d %s\n",
                          schedule[schedule_count].parking_slot,
@@ -505,16 +480,40 @@ void shortest_job_first_to_pipe(int pipe_fd) {
                 write(pipe_fd, buffer, strlen(buffer));
 
                 schedule_count++;
-                is_scheduled[selected] = 1;
-                is_assigned = 1;
-                curr_scheduled++;
                 summary[2][1]++;
+                assigned = 1;
                 break;
             }
         }
 
-        if (!is_assigned) {
-            release_facilities(&bookings[selected]);
+        // If no slot is available, reject the booking
+        if (!assigned) {
+            release_facilities(&local_bookings[i]);
+            schedule[schedule_count].id = local_bookings[i].id;
+            schedule[schedule_count].parking_slot = -1;
+            schedule[schedule_count].start_time = start_time;
+            schedule[schedule_count].end_time = end_time;
+            strcpy(schedule[schedule_count].status, "Rejected");
+
+            snprintf(buffer, sizeof(buffer), "%d %s %s %s %s %.2f %d",
+                     schedule[schedule_count].id,
+                     local_bookings[i].client,
+                     local_bookings[i].type,
+                     local_bookings[i].date,
+                     local_bookings[i].time,
+                     local_bookings[i].duration,
+                     local_bookings[i].facility_count);
+            for (int k = 0; k < local_bookings[i].facility_count; k++) {
+                strncat(buffer, " ", sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, local_bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
+            }
+            snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %d %s\n",
+                     schedule[schedule_count].parking_slot,
+                     schedule[schedule_count].status);
+            write(pipe_fd, buffer, strlen(buffer));
+
+            schedule_count++;
+            summary[2][2]++;
         }
     }
 }
@@ -540,8 +539,9 @@ void priority_schedule_to_pipe(int pipe_fd) {
         int start_time = convert_time_to_int(bookings[i].time);
         int end_time = start_time + bookings[i].duration;
 
-        // Check facility availability and reject if no avaliable according to the rules (3 facilities)
+        // Check facility availability and reject if unavailable
         if (!check_and_reserve_facilities(&bookings[i])) {
+            release_facilities(&bookings[i]);
             schedule[schedule_count].id = bookings[i].id;
             schedule[schedule_count].parking_slot = -1;
             schedule[schedule_count].start_time = start_time;
@@ -605,53 +605,7 @@ void priority_schedule_to_pipe(int pipe_fd) {
             }
         }
 
-        // If no slot, displace a lower prio booking
-        if (!assigned) {
-            for (int j = 0; j < schedule_count; j++) {
-                Schedule* s = &schedule[j];
-                Booking* b = &refer_booking[s->id];
-
-                if (get_priority(bookings[i].type) < get_priority(b->type)) {
-                    // Displace the lower-priority booking, release, then mark that its rejected
-                    release_facilities(b); 
-                    s->parking_slot = -1; 
-                    strcpy(s->status, "Rejected");
-                    summary[1][2]++;
-
-                    // Assign the higher-priority booking
-                    schedule[schedule_count].id = bookings[i].id;
-                    schedule[schedule_count].parking_slot = s->parking_slot;
-                    schedule[schedule_count].start_time = start_time;
-                    schedule[schedule_count].end_time = end_time;
-                    strcpy(schedule[schedule_count].status, "Scheduled");
-                    parking_slots[s->parking_slot - 1] = end_time;
-
-                    snprintf(buffer, sizeof(buffer), "%d %s %s %s %s %.2f %d",
-                             schedule[schedule_count].id,
-                             bookings[i].client,
-                             bookings[i].type,
-                             bookings[i].date,
-                             bookings[i].time,
-                             bookings[i].duration,
-                             bookings[i].facility_count);
-                    for (int k = 0; k < bookings[i].facility_count; k++) {
-                        strncat(buffer, " ", sizeof(buffer) - strlen(buffer) - 1);
-                        strncat(buffer, bookings[i].facilities[k], sizeof(buffer) - strlen(buffer) - 1);
-                    }
-                    snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %d %s\n",
-                             schedule[schedule_count].parking_slot,
-                             schedule[schedule_count].status);
-                    write(pipe_fd, buffer, strlen(buffer));
-
-                    schedule_count++;
-                    summary[1][1]++;
-                    assigned = 1;
-                    break;
-                }
-            }
-        }
-
-        // If still not assigned, reject the booking
+        // If no slot is available, reject the booking
         if (!assigned) {
             release_facilities(&bookings[i]); 
             schedule[schedule_count].id = bookings[i].id;
@@ -682,7 +636,6 @@ void priority_schedule_to_pipe(int pipe_fd) {
         }
     }
 }
-
 /*
 sample line is like this: 3 member_D addEssentials 2025-05-10 09:00 2.00 1 battery 1 Scheduled
 parse each word by using strtok with "\n"
