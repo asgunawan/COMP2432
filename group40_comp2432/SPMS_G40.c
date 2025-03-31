@@ -238,7 +238,7 @@ void release_facilities(Booking* b) {
         for (int j = 0; j < MAX_FACILITIES; j++) {
             if (strcmp(b->facilities[i], facility_names[j]) == 0) {
                 facility_availability[j]++;
-                printf("Facility released: %s (Remaining: %d)\n", facility_names[j], facility_availability[j]); // Debug
+                // printf("Facility released: %s (Remaining: %d)\n", facility_names[j], facility_availability[j]); // DEBUG
                 break;
             }
         }
@@ -803,6 +803,8 @@ void printBookings(const char* algorithm, int pipe_fd) {
         }
         printf("\n");
     }
+    printf("- End -\n");
+    printf("==========================================================\n");
 }
 
 // DEBUG: run dummy data thing 
